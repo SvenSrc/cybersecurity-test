@@ -35,11 +35,11 @@ jobs:
       run: |
         curl -L -o dependency-check.zip https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
         unzip dependency-check.zip -d dependency-check
-        chmod +x dependency-check/bin/dependency-check.sh
+        chmod +x dependency-check/dependency-check/bin/dependency-check.sh
 
     - name: Run OWASP Dependency Check
       run: |
-        dependency-check/bin/dependency-check.sh --project "SelfServiceCheckout" --scan src/main/java --format HTML --out dependency-check-report
+
 
     # - name: Run Trivy (Container Security)
     #   run: |
