@@ -36,14 +36,15 @@ jobs:
     - uses: gitleaks/gitleaks-action@v2
       with:
         args: detect --source . --report-format sarif --report-path gitleaks.sarif --redact
-
-    # Trivy
-    - run: |
-        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
-        trivy fs --security-checks vuln,secret,config --format sarif --output trivy.sarif .
-    - uses: github/codeql-action/upload-sarif@v3
+#Trivy
+    - name: Run Trivy vulnerability scanner in fs mode
+      uses: aquasecurity/trivy-action@0.28.0
       with:
-        sarif_file: trivy.sarif
+        scan-type: fs
+        scan-ref: .
+        format: sarif
+        output: trivy.sarif
+        scanners: vuln,secret,config
 
   codeql:
     runs-on: ubuntu-latest
