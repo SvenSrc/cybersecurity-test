@@ -39,6 +39,17 @@ jobs:
 
     - name: Run OWASP Dependency Check
       run: |
+        dependency-check/dependency-check/bin/dependency-check.sh \
+          --project "SelfServiceCheckout" \
+          --scan src/main/java \
+          --format HTML \
+          --out dependency-check-report
+
+    - name: Upload Dependency Check Report
+      uses: actions/upload-artifact@v3
+      with:
+        name: dependency-check-report
+        path: dependency-check-report
 
 
     # - name: Run Trivy (Container Security)
