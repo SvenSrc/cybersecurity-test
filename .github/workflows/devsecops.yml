@@ -6,59 +6,161 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   security:
+    name: Security Checks (SAST, SCA, Secrets, Misconfig)
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout Code
       uses: actions/checkout@v3
 
+    - name: Validate Gradle Wrapper
+      uses: gradle/wrapper-validation-action@v2
+
     - name: Set up JDK
       uses: actions/setup-java@v3
       with:
         distribution: 'temurin'
         java-version: '21'
+        cache: 'gradle'
 
     - name: Make gradlew executable
       run: chmod +x gradlew
-  
-    - name: Build with Gradle
-      run: ./gradlew build
 
-    - name: Run Semgrep (SAST)
+    - name: Build with Gradle (inkl. Tests)
+      run: ./gradlew --no-daemon clean build
+
+    # ---------- SAST: Semgrep ----------
+    - name: Run Semgrep (SAST) – SARIF
+      continue-on-error: true
       run: |
-        pip install semgrep
-        semgrep scan --config auto .
-    
-    - name: Install OWASP Dependency Check
+        python3 -m pip install --upgrade pip
+        python3 -m pip install semgrep
+        semgrep scan --config auto --sarif --output semgrep.sarif .
+    - name: Upload Semgrep SARIF to GitHub
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: semgrep.sarif
+
+    # ---------- SCA: OWASP Dependency-Check ----------
+    - name: Cache Dependency-Check Data
+      uses: actions/cache@v4
+      with:
+        path: dependency-check-data
+        key: dependency-check-data-${{ runner.os }}-v8
+        restore-keys: |
+          dependency-check-data-${{ runner.os }}-
+
+    - name: Install OWASP Dependency-Check
       run: |
-        curl -L -o dependency-check.zip https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
-        unzip dependency-check.zip -d dependency-check
+        DC_VERSION="8.4.0"
+        curl -sSL -o dependency-check.zip https://github.com/jeremylong/DependencyCheck/releases/download/v${DC_VERSION}/dependency-check-${DC_VERSION}-release.zip
+        unzip -q dependency-check.zip -d dependency-check
         chmod +x dependency-check/dependency-check/bin/dependency-check.sh
 
-    - name: Run OWASP Dependency Check (Offline)
+    - name: Run Dependency-Check (SCA) – HTML & SARIF
+      continue-on-error: true
       run: |
+        rm -rf dependency-check-report
+        mkdir -p dependency-check-report
         dependency-check/dependency-check/bin/dependency-check.sh \
           --project "SelfServiceCheckout" \
-          --scan src/main/java \
-          --format HTML \
+          --scan "." \
+          --format "HTML" \
+          --format "SARIF" \
           --out dependency-check-report \
-          --noupdate
-
-    - name: Upload Dependency Check Report
+          --data dependency-check-data
+    - name: Upload Dependency-Check Report (HTML)
       uses: actions/upload-artifact@v4
       with:
         name: dependency-check-report
         path: dependency-check-report
+    - name: Upload Dependency-Check SARIF to GitHub
+      if: ${{ hashFiles('dependency-check-report/dependency-check-report.sarif') != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: dependency-check-report/dependency-check-report.sarif
 
+    # ---------- Secrets: Gitleaks ----------
+    - name: Install Gitleaks
+      run: |
+        GL_VERSION=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep tag_name | cut -d '"' -f 4 | sed 's/v//')
+        curl -sSL -o gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v${GL_VERSION}/gitleaks_${GL_VERSION}_linux_x64.tar.gz
+        tar -xzf gitleaks.tar.gz gitleaks
+        chmod +x gitleaks
+        ./gitleaks version
+    - name: Run Gitleaks (Secrets) – SARIF
+      continue-on-error: true
+      run: |
+        ./gitleaks detect \
+          --source . \
+          --report-format sarif \
+          --report-path gitleaks.sarif \
+          --redact
+    - name: Upload Gitleaks SARIF to GitHub
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: gitleaks.sarif
 
-    # - name: Run Trivy (Container Security)
-    #   run: |
-    #     curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
-    #     docker build -t selfservicecheckout .
-    #     trivy image selfservicecheckout
+    # ---------- FS/Config/Secrets: Trivy (ohne Docker) ----------
+    - name: Install Trivy (CLI)
+      run: |
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b ./trivy-bin
+        ./trivy-bin/trivy --version
 
-    # - name: Run OWASP ZAP (DAST)
-    #   run: |
-    #     docker run -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:8080 -r zap-report.html || true
+    - name: Trivy FS scan (Vuln+Secrets+Misconfig) – SARIF
+      continue-on-error: true
+      run: |
+        ./trivy-bin/trivy fs \
+          --security-checks vuln,secret,config \
+          --format sarif \
+          --output trivy-fs.sarif \
+          --skip-dirs .git \
+          .
+    - name: Upload Trivy FS SARIF to GitHub
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: trivy-fs.sarif
+
+    # Optional: getrennte Policy/Misconfig-Analyse (Terraform/K8s/CI-Dateien), läuft einfach ins Leere wenn nichts da ist
+    - name: Trivy Config (IaC/Misconfig) – SARIF
+      continue-on-error: true
+      run: |
+        ./trivy-bin/trivy config \
+          --format sarif \
+          --output trivy-config.sarif \
+          .
+    - name: Upload Trivy Config SARIF to GitHub
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: trivy-config.sarif
+
+  # ---------- CodeQL als separater Job ----------
+  codeql:
+    name: CodeQL (Java)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: java
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:java"
