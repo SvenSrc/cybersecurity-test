@@ -37,13 +37,14 @@ jobs:
         unzip dependency-check.zip -d dependency-check
         chmod +x dependency-check/dependency-check/bin/dependency-check.sh
 
-    - name: Run OWASP Dependency Check
+    - name: Run OWASP Dependency Check (Offline)
       run: |
         dependency-check/dependency-check/bin/dependency-check.sh \
           --project "SelfServiceCheckout" \
           --scan src/main/java \
           --format HTML \
-          --out dependency-check-report
+          --out dependency-check-report \
+          --noupdate
 
     - name: Upload Dependency Check Report
       uses: actions/upload-artifact@v4
