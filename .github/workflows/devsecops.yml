@@ -1,0 +1,46 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up JDK
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Build with Gradle
+      run: ./gradlew build
+
+    - name: Run Semgrep (SAST)
+      run: |
+        pip install semgrep
+        semgrep scan --config auto .
+
+    - name: Run OWASP Dependency Check (SCA)
+      run: |
+        mkdir dependency-check
+        wget https://github.com/jeremylong/DependencyCheck/releases/download/v8.4.0/dependency-check-8.4.0-release.zip
+        unzip dependency-check-8.4.0-release.zip -d dependency-check
+        dependency-check/bin/dependency-check.sh --project "SelfServiceCheckout" --scan .
+
+    # - name: Run Trivy (Container Security)
+    #   run: |
+    #     curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh
+    #     docker build -t selfservicecheckout .
+    #     trivy image selfservicecheckout
+
+    # - name: Run OWASP ZAP (DAST)
+    #   run: |
+    #     docker run -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:8080 -r zap-report.html || true
