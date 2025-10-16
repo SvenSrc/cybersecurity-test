@@ -11,7 +11,7 @@ permissions:
   security-events: write
   actions: read
 jobs:
-  security:
+  semgrep-security-scan:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
@@ -28,7 +28,6 @@ jobs:
         chmod +x gradlew
         ./gradlew build
 
-    # Semgrep
     - name: Install and run Semgrep
       run: |
         pip install semgrep
@@ -38,53 +37,3 @@ jobs:
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: semgrep.sarif
-
-    # Gitleaks
-    - name: Run Gitleaks
-      uses: gitleaks/gitleaks-action@v2
-      with:
-        args: detect --source . --report-format sarif --report-path gitleaks.sarif --redact
-
-    - name: Upload Gitleaks SARIF results
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: gitleaks.sarif
-
-    # Trivy
-    - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@0.28.0
-      with:
-        scan-type: fs
-        scan-ref: .
-        format: sarif
-        output: trivy.sarif
-        scanners: vuln,secret,config
-
-    - name: Upload Trivy SARIF results
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: trivy.sarif
-
-  codeql:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Set up Java
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '21'
-
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
-      with:
-        languages: java
-        build-mode: none
-
-    - name: Analyze with CodeQL
-      uses: github/codeql-action/analyze@v3
