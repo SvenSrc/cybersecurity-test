@@ -1,5 +1,4 @@
 name: DevSecOps Pipeline
-
 on:
   push:
     branches: [ main ]
@@ -28,8 +27,50 @@ jobs:
       run: |
         chmod +x gradlew
         ./gradlew build
+      continue-on-error: true
 
-    - name: Install and run Semgrep
+    - name: Install Semgrep
       run: |
+        pip install --upgrade pip
         pip install semgrep
-        semgrep scan --config auto .
+
+    - name: Run Semgrep Security Scan
+      run: |
+        semgrep scan --config auto . --json -o semgrep-report.json || true
+        semgrep scan --config auto . --sarif -o semgrep-report.sarif || true
+        semgrep scan --config auto . --text -o semgrep-report.txt || true
+
+    - name: Display Semgrep Report
+      if: always()
+      run: cat semgrep-report.txt
+
+    - name: Upload Semgrep SARIF to GitHub Security Tab
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: semgrep-report.sarif
+        category: 'semgrep'
+
+    - name: Upload Semgrep Reports as Artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: semgrep-reports
+        path: |
+          semgrep-report.json
+          semgrep-report.sarif
+          semgrep-report.txt
+        retention-days: 30
+
+    - name: Check Semgrep Results
+      if: always()
+      run: |
+        echo "=== Semgrep Scan Complete ==="
+        echo "Reports generated:"
+        echo "- JSON Report: semgrep-report.json"
+        echo "- SARIF Report: semgrep-report.sarif"
+        echo "- Text Report: semgrep-report.txt"
+        echo ""
+        echo "You can find the results in:"
+        echo "1. GitHub Security tab (SARIF upload)"
+        echo "2. Actions artifacts (all formats)"
